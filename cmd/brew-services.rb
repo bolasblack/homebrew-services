@@ -155,6 +155,11 @@ module ServicesCli
       # parse arguments
       @args = ARGV.reject { |arg| arg[0] == 45 }.map { |arg| arg.include?("/") ? arg : arg.downcase } # 45.chr == '-'
       @cmd = @args.shift
+
+      if @args.include?('--root')
+        @args.delete '--root'
+        @root_role = true
+      end
       @formula = @args.shift
 
       # dispatch commands and aliases
@@ -242,12 +247,13 @@ module ServicesCli
       odie "Formula `#{service.name}` not installed, #startup_plist not implemented or no plist file found" if !custom_plist && !service.plist?
 
       temp = Tempfile.new(service.label)
-      temp << service.generate_plist(custom_plist)
+      temp << service.generate_plist(custom_plist, @root_role)
       temp.flush
 
       rm service.dest if service.dest.exist?
       service.dest_dir.mkpath unless service.dest_dir.directory?
       cp temp.path, service.dest
+      chmod 'a+r', service.dest
 
       # clear tempfile
       temp.close
@@ -340,7 +346,7 @@ class Service
   end
 
   # Generate that plist file, dude.
-  def generate_plist(data = nil)
+  def generate_plist(data = nil, force_root = false)
     data ||= plist.file? ? plist : formula.startup_plist
 
     if data.respond_to?(:file?) && data.file?
@@ -354,11 +360,17 @@ class Service
     data = data.to_s.gsub(/\{\{([a-z][a-z0-9_]*)\}\}/i) { |m| formula.send($1).to_s if formula.respond_to?($1) }.
               gsub(%r{(<key>Label</key>\s*<string>)[^<]*(</string>)}, '\1' + label + '\2')
 
+    if force_root
+      startup_user = "root"
+    else
+      startup_user = formula.startup_user
+    end
+
     # and force fix UserName, if necessary
-    if formula.startup_user != "root" && data =~ %r{<key>UserName</key>\s*<string>root</string>}
-      data = data.gsub(%r{(<key>UserName</key>\s*<string>)[^<]*(</string>)}, '\1' + formula.startup_user + '\2')
-    elsif ServicesCli.root? && formula.startup_user != "root" && data !~ %r{<key>UserName</key>}
-      data = data.gsub(%r{(</dict>\s*</plist>)}, "  <key>UserName</key><string>#{formula.startup_user}</string>\n\\1")
+    if startup_user != "root" && data =~ %r{<key>UserName</key>\s*<string>root</string>}
+      data = data.gsub(%r{(<key>UserName</key>\s*<string>)[^<]*(</string>)}, '\1' + startup_user + '\2')
+    elsif ServicesCli.root? && data !~ %r{<key>UserName</key>}
+      data = data.gsub(%r{(</dict>\s*</plist>)}, "  <key>UserName</key><string>#{startup_user}</string>\n\\1")
     end
 
     if ARGV.verbose?

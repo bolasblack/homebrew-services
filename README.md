@@ -14,7 +14,11 @@ Install and start service mysql at login:
 
 ```
 $ brew install mysql
+
 $ brew services start mysql
+
+# Assign UserName as root
+$ sudo brew services start --root mysql
 ```
 
 Stop service mysql:
